@@ -1,0 +1,93 @@
+#include <SPI.h>
+#include <LoRa.h>
+#include "DHT.h"
+
+// ---------------- Pin Definitions ----------------
+#define DHTPIN 15
+#define DHTTYPE DHT22
+#define FLAME_PIN 32
+#define GAS_PIN 34
+#define VIB_PIN 35
+#define SS 5
+#define RST 14
+#define DIO0 26   // ✅ Corrected (final)
+#define SCK 18
+#define MISO 19
+#define MOSI 23
+
+// ---------------- Objects ----------------
+DHT dht(DHTPIN, DHTTYPE);
+
+// ---------------- Thresholds ----------------
+#define TEMP_THRESHOLD 32.0
+#define GAS_THRESHOLD 2000
+#define VIB_THRESHOLD LOW
+
+// ---------------- Setup ----------------
+void setup() {
+  Serial.begin(115200);
+  dht.begin();
+
+  pinMode(FLAME_PIN, INPUT);
+  pinMode(GAS_PIN, INPUT);
+  pinMode(VIB_PIN, INPUT);
+
+  SPI.begin(SCK, MISO, MOSI, SS);
+  LoRa.setPins(SS, RST, DIO0);
+
+  if (!LoRa.begin(433E6)) {
+    Serial.println("❌ LoRa start failed!");
+    while (1);
+  }
+  Serial.println("✅ LoRa Transmitter Started");
+}
+
+// ---------------- Main Loop ----------------
+void loop() {
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  int gasValue = analogRead(GAS_PIN);
+  int flameValue = digitalRead(FLAME_PIN);
+  int vibValue = digitalRead(VIB_PIN);
+
+  if (isnan(temperature) || isnan(humidity)) {
+    Serial.println("❌ Failed to read from DHT22 sensor!");
+    delay(2000);
+    return;
+  }
+
+  Serial.println("================================");
+  Serial.println("NORMAL DATA");
+  Serial.println("ZONE: SIET");
+  Serial.print("TEMP: "); Serial.print(temperature); Serial.println("°C");
+  Serial.print("HUMIDITY: "); Serial.print(humidity); Serial.println("%");
+  Serial.print("GAS: "); Serial.println(gasValue);
+  Serial.print("FLAME: "); Serial.println(flameValue == LOW ? "FIRE DETECTED" : "SAFE");
+  Serial.print("EARTHQUAKE: "); Serial.println(vibValue > VIB_THRESHOLD ? "VIBRATION DETECTED" : "NORMAL");
+
+  // ---------------- Emergency Conditions ----------------
+  String message;
+  if (temperature > TEMP_THRESHOLD) {
+    message = "EMERGENCY: HIGH TEMPERATURE";
+  } else if (gasValue > GAS_THRESHOLD) {
+    message = "EMERGENCY: GAS LEAK";
+  } else if (flameValue == LOW) {
+    message = "EMERGENCY: FIRE DETECTED";
+  } else if (vibValue > VIB_THRESHOLD) {
+    message = "EMERGENCY: EARTHQUAKE DETECTED";
+  } else {
+    message = "NORMAL DATA\nZONE: SIET\nTEMP: " + String(temperature) +
+              "°C\nHUMIDITY: " + String(humidity) +
+              "%\nGAS: " + String(gasValue) +
+              "\nFLAME: SAFE\nEARTHQUAKE: NORMAL";
+  }
+
+  // ---------------- Send via LoRa ----------------
+  LoRa.beginPacket();
+  LoRa.print(message);
+  LoRa.endPacket();
+
+  Serial.println("-> Sent: " + message);
+  Serial.println("================================");
+  delay(3000);
+}
